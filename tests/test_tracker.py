@@ -111,5 +111,21 @@ class CheckTests(unittest.TestCase):
         self.assertIn("timeout", last["error"])
 
 
+class NoiseTests(unittest.TestCase):
+    def test_currency_number_wins_over_rating_and_model(self):
+        self.assertEqual(parse_price("4.5 out of 5 stars | Model 2024 | EGP 1,299.00"), 1299.0)
+        self.assertEqual(parse_price("iPhone 15 Pro 3,250.00 جنيه"), 3250.0)
+
+    def test_scan_skips_shipping_text(self):
+        html = "<html><body><p>Free shipping over EGP 500</p><p>Price: EGP 899.00</p></body></html>"
+        price, _ = extract_price(html, url="https://shop.example.eg/p/1")
+        self.assertEqual(price, 899.0)
+
+    def test_scan_does_not_pick_bare_number_in_currency_text(self):
+        html = "<html><body><p>Model 5000 available in EGP stores only</p></body></html>"
+        price, _ = extract_price(html, url="https://shop.example.eg/p/2")
+        self.assertIsNone(price)
+
+
 if __name__ == "__main__":
     unittest.main()

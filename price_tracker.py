@@ -39,19 +39,42 @@ SITE_SELECTORS = {
     "noon.com": ["[data-qa='div-price-now']", ".priceNow"],
 }
 
-PRICE_RE = re.compile(r"(\d[\d,]*(?:\.\d{1,2})?)\s*(?:EGP|جنيه|ج\.?م\.?|LE|E£)?", re.IGNORECASE)
+CURRENCY = r"(?:EGP|جنيه|ج\.?\s?م\.?|LE|E£)"
+NUM = r"(\d[\d,]*(?:\.\d{1,2})?)"
+# A number touching a currency marker, before or after it ("EGP 12,499.00" / "3,250 جنيه").
+CURRENCY_NUM_RE = re.compile(rf"(?:{CURRENCY}\s*{NUM})|(?:{NUM}\s*{CURRENCY})", re.IGNORECASE)
+# Text that mentions a currency but is not the product price.
+NOISE_RE = re.compile(
+    r"shipping|delivery|free over|free for orders|orders over|minimum|save |off\b|rating|stars?|reviews?|"
+    r"شحن|توصيل|تقييم|خصم|الحد الأدنى|وفر",
+    re.IGNORECASE,
+)
 
 
-def parse_price(text: str) -> float | None:
-    """Extract the first plausible price number from text."""
-    m = PRICE_RE.search(text.replace("٬", ","))
-    if not m:
-        return None
+def _to_float(raw: str) -> float | None:
     try:
-        value = float(m.group(1).replace(",", ""))
+        value = float(raw.replace(",", ""))
     except ValueError:
         return None
     return value if value > 0 else None
+
+
+def parse_price(text: str, require_currency: bool = False) -> float | None:
+    """Extract a plausible price from text.
+
+    A number next to a currency marker wins over any other number, so ratings,
+    model numbers and shipping thresholds that appear earlier in the text are
+    ignored. Without a currency marker the first number is used, unless
+    `require_currency` is set.
+    """
+    text = text.replace("٬", ",")
+    m = CURRENCY_NUM_RE.search(text)
+    if m:
+        return _to_float(m.group(1) or m.group(2))
+    if require_currency:
+        return None
+    m = re.search(NUM, text)
+    return _to_float(m.group(1)) if m else None
 
 
 def extract_price(html: str, url: str = "", selector: str | None = None) -> tuple[float | None, str]:
@@ -87,7 +110,9 @@ def extract_price(html: str, url: str = "", selector: str | None = None) -> tupl
                 return price, "meta itemprop=price"
 
     for el in soup.find_all(string=re.compile(r"EGP|جنيه|ج\.?م", re.IGNORECASE)):
-        price = parse_price(el)
+        if NOISE_RE.search(el):
+            continue
+        price = parse_price(el, require_currency=True)
         if price is not None:
             return price, "currency-text scan"
     return None, "not found"
